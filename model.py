@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-from torch import summary
 
 class CNN(nn.Module):
     def __init__(self,
