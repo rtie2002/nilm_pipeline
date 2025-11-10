@@ -35,7 +35,7 @@ class NormalDataset(data.Dataset):
     def __getitem__(self, idx):
         return self.x[idx], self.y[idx]
     
-    
+
 def load_data(path, postfix, appliance, choose=None):
     files = sorted(glob.glob(path + postfix))
     if type(choose) is int:
@@ -48,13 +48,15 @@ def load_data(path, postfix, appliance, choose=None):
         return df
     elif type(choose) is list:
         dfs = []
-        for file in choose:
-            if type(file) is int:
-                print(f"building: {files[file]}")
-                dfs.append(pd.read_csv(files[file], usecols=['Aggregate', appliance]))
-            elif type(file) is str:
-                file = glob.glob(path + file + postfix)[0]
-                dfs.append(pd.read_csv(file, usecols=['Aggregate', appliance]))
+        for file_name in choose:
+            # Construct the full file path
+            full_file_path = os.path.join(path, file_name + postfix.lstrip('*'))
+            print(f"Attempting to load file: {full_file_path}")
+            if os.path.exists(full_file_path):
+                dfs.append(pd.read_csv(full_file_path, usecols=['Aggregate', appliance]))
+            else:
+                print(f"File not found: {full_file_path}")
+                # You might want to handle this case differently, e.g., raise an error or skip the file
         return dfs
     elif choose is None:
         random_choose = np.random.randint(0, len(files))
