@@ -126,20 +126,24 @@ def series_to_supervised(data: pd.DataFrame,
     return agg
 
 def construct_dataset(df, appliance, batchsize=64):
-    
+
+    # Standardization
     scalerx = StandardScaler()
     scalery = StandardScaler()
     scaler_x = scalerx.fit(df[['Aggregate']])
     scaler_y = scalery.fit(df[[appliance]])
-    
+
     df['Aggregate'] = scaler_x.transform(df[['Aggregate']])
     df[appliance] = scaler_y.transform(df[[appliance]])
-    
+
+    #Split the dataset
     n = len(df)
-    train_df = df[int(0*n):int(0.8*n)]
-    test_df = df[int(0.8*n):int(1*n)]
+    train_ratio = 0.8
+    test_ratio = 0.2
+    train_df = df[int(0*n):int(train_ratio*n)] # Get data from 0% to 80%
+    test_df = df[int(test_ratio*n):int(1*n)]   # Get data from 80% to 100%
     # print(int(0.8*n))
-    
+
     train_ds = series_to_supervised(train_df,
                                     n_in=576,
                                     rate_in=1,
@@ -151,28 +155,21 @@ def construct_dataset(df, appliance, batchsize=64):
                                 rate_in=1,
                                 sel_in=['Aggregate'],
                                 sel_out=[appliance])
-    
+
     train_ds = train_ds.values
     test_ds = test_ds.values
     train_ds = train_ds[::576, :]
     test_ds = test_ds[::576, :]
-    
-    # Clear intermediate DataFrames to free memory
-    del train_df, test_df
-    gc.collect()
+
 
     train_ds = NormalDataset(train_ds)
     test_ds = NormalDataset(test_ds)
-    
+
     input_dim = train_ds.x[0].shape[-1]
 
     train_dataloader = data.DataLoader(train_ds, batch_size=batchsize, shuffle=True)
-    # Use smaller batch size for test to avoid OOM - limit to reasonable size
-    test_batch_size = min(256, len(test_ds)) if len(test_ds) > 0 else 1
-    test_dataloader = data.DataLoader(test_ds, batch_size=test_batch_size, shuffle=False)
+    test_dataloader = data.DataLoader(test_ds, batch_size=len(test_ds), shuffle=False)
     del test_ds
-    gc.collect()  # Force garbage collection
     torch.cuda.empty_cache()
-    return train_dataloader, test_dataloader, scaler_y, input_dim, train_ds, scaler_x 
-
+    return train_dataloader, test_dataloader, scaler_y, input_dim, train_ds, scaler_x
  
