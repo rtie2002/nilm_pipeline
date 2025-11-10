@@ -12,7 +12,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 def setup_seed(seed: int = 1234):
     """set a fix random seed.
-    
+
     Args:
         seed (int, optional): random seed. Defaults to 9.
     """
@@ -22,7 +22,7 @@ def setup_seed(seed: int = 1234):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
 
-# Divide window data into x and y  
+# Divide window data into x and y
 class NormalDataset(data.Dataset):
 
     def __init__(self, data):
@@ -77,11 +77,11 @@ def choose_data(dataset, appliance):
     for csv_file in csv_files:
         file_path = os.path.join(refit_folder, csv_file)
         df = pd.read_csv(file_path)
-        
+
         # appliance name
         if appliance in df.columns:
             csv_files_with_column.append(csv_file.rstrip(".csv"))
-
+    print(csv_files_with_column)
     return csv_files_with_column
 
 def series_to_supervised(data: pd.DataFrame,
@@ -94,7 +94,7 @@ def series_to_supervised(data: pd.DataFrame,
     df = pd.DataFrame(data)
     orig_cols = df.columns
     cols, names = list(), list()
-    
+
     # input sequence (t-n, ... t-1) n=n_in
     for i in range(n_in, 0, -rate_in):
         if sel_in is None:
@@ -104,7 +104,7 @@ def series_to_supervised(data: pd.DataFrame,
             for var in sel_in:
                 cols.append(df[var].shift(i))
                 names += [('%s(t-%d)' % (var, i))]
-    
+
     # current time (t) sequence
     for i in range(n_in, 0, -rate_in):
         if sel_out is None:
@@ -114,11 +114,11 @@ def series_to_supervised(data: pd.DataFrame,
             for var in sel_out:
                 cols.append(df[var].shift(i))
                 names += [('%s(t-%d)' % (var, i))]
-    
+
     # put it all together
     agg = pd.concat(cols, axis=1)
     agg.columns = names
-    
+
     # drop rows with NaN values
     if dropnan:
         agg.dropna(inplace=True)
