@@ -157,6 +157,9 @@ def construct_dataset(df, appliance, batchsize=64):
     train_ds = train_ds[::576, :]
     test_ds = test_ds[::576, :]
     
+    # Clear intermediate DataFrames to free memory
+    del train_df, test_df
+    gc.collect()
 
     train_ds = NormalDataset(train_ds)
     test_ds = NormalDataset(test_ds)
@@ -164,8 +167,11 @@ def construct_dataset(df, appliance, batchsize=64):
     input_dim = train_ds.x[0].shape[-1]
 
     train_dataloader = data.DataLoader(train_ds, batch_size=batchsize, shuffle=True)
-    test_dataloader = data.DataLoader(test_ds, batch_size=len(test_ds), shuffle=False)
+    # Use smaller batch size for test to avoid OOM - limit to reasonable size
+    test_batch_size = min(256, len(test_ds)) if len(test_ds) > 0 else 1
+    test_dataloader = data.DataLoader(test_ds, batch_size=test_batch_size, shuffle=False)
     del test_ds
+    gc.collect()  # Force garbage collection
     torch.cuda.empty_cache()
     return train_dataloader, test_dataloader, scaler_y, input_dim, train_ds, scaler_x 
 
