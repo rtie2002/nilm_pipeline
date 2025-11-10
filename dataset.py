@@ -6,6 +6,8 @@ import random
 import torch
 import torch.utils.data as data
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
+
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 def setup_seed(seed: int = 1234):
