@@ -100,73 +100,6 @@ def choose_data(dataset, appliance):
     print(csv_files_with_column)
     return csv_files_with_column
 
-def merge_dataframes_smart(dataframes, target_total_rows=None, memory_limit_mb=8000):
-    """
-    Intelligently merge dataframes using all data while managing memory.
-    Automatically calculates optimal sampling to use maximum data within memory limits.
-    
-    Args:
-        dataframes: List of pandas DataFrames to merge
-        target_total_rows: Target total rows (None = use all data, but respect memory limit)
-        memory_limit_mb: Approximate memory limit in MB (default: 8000MB = 8GB)
-        
-    Returns:
-        Merged DataFrame
-    """
-    if not dataframes:
-        raise ValueError("No dataframes provided")
-    
-    total_available = sum(len(df) for df in dataframes)
-    print(f"Total available rows across all dataframes: {total_available:,}")
-    
-    # Estimate memory usage: each row ~0.0002 MB (2 columns, float64)
-    # After series_to_supervised: each row becomes ~0.23 MB (1152 columns)
-    # Add 50% buffer for intermediate operations
-    rows_per_mb = memory_limit_mb / (0.23 * 1.5)
-    max_safe_rows = int(rows_per_mb)
-    
-    if target_total_rows is None:
-        # Use all data if it fits in memory, otherwise use max safe amount
-        if total_available <= max_safe_rows:
-            target_total_rows = total_available
-            print(f"All data fits in memory ({total_available:,} rows)")
-        else:
-            target_total_rows = max_safe_rows
-            print(f"Data too large for memory. Using {target_total_rows:,} rows (max safe: {max_safe_rows:,})")
-            print(f"This uses {target_total_rows/total_available*100:.1f}% of available data")
-    else:
-        if target_total_rows > max_safe_rows:
-            print(f"WARNING: Requested {target_total_rows:,} rows may exceed memory limit")
-            print(f"Recommended maximum: {max_safe_rows:,} rows")
-            target_total_rows = min(target_total_rows, max_safe_rows)
-    
-    # Calculate rows per dataframe to achieve target
-    num_dataframes = len(dataframes)
-    rows_per_df = target_total_rows // num_dataframes
-    
-    sampled_dfs = []
-    for i, df in enumerate(dataframes):
-        df_size = len(df)
-        if df_size <= rows_per_df:
-            # Use all rows if dataframe is smaller than target
-            sampled_dfs.append(df.copy())
-            print(f"DataFrame {i}: using all {df_size:,} rows")
-        else:
-            # Sample proportionally
-            df_sample = df.sample(n=rows_per_df, random_state=42).reset_index(drop=True)
-            sampled_dfs.append(df_sample)
-            print(f"DataFrame {i}: sampled {rows_per_df:,} rows from {df_size:,} total ({rows_per_df/df_size*100:.1f}%)")
-    
-    merged_df = pd.concat(sampled_dfs, ignore_index=True)
-    
-    # Final check and limit if needed
-    if len(merged_df) > target_total_rows:
-        merged_df = merged_df.sample(n=target_total_rows, random_state=42).reset_index(drop=True)
-        print(f"Final sampling: limited to {target_total_rows:,} rows")
-    
-    print(f"Merged {len(dataframes)} dataframes into one with shape: {merged_df.shape}")
-    return merged_df
-
 def series_to_supervised(data: pd.DataFrame,
                          n_in: int = 1,
                          rate_in: int = 1,
@@ -208,54 +141,37 @@ def series_to_supervised(data: pd.DataFrame,
     agg.index = range(len(agg))
     return agg
 
-def construct_dataset(df, appliance, batchsize=64, max_rows=None, memory_limit_mb=8000):
-
-    # 0. Intelligently limit rows based on memory if needed
-    if max_rows is None:
-        # Auto-calculate max_rows based on memory limit
-        # After series_to_supervised: each row becomes ~0.23 MB (1152 columns)
-        # Add 50% buffer for intermediate operations
-        rows_per_mb = memory_limit_mb / (0.23 * 1.5)
-        max_rows = int(rows_per_mb)
-        print(f"Auto-calculated max_rows: {max_rows:,} based on {memory_limit_mb}MB memory limit")
-    
-    # Limit total rows to prevent memory issues
-    # Note: series_to_supervised will create windows, so actual samples will be less
-    if len(df) > max_rows:
-        print(f"WARNING: Input dataframe has {len(df):,} rows, limiting to {max_rows:,} to prevent memory issues")
-        df = df.sample(n=max_rows, random_state=42).reset_index(drop=True)
-        print(f"Limited input dataframe to {max_rows:,} rows")
-    else:
-        print(f"Input dataframe has {len(df):,} rows (within limit)")
-    
-    # 1. Split dataset first (to avoid data leakage)
+def construct_dataset(df, appliance, batchsize=64):
+    """
+    Construct dataset with proper train/test split and standardization.
+    CRITICAL: Split first, then fit scalers only on training data to avoid data leakage.
+    """
+    # Step 1: Split dataset FIRST (before any standardization)
     n = len(df)
     train_ratio = 0.8
-    test_ratio = 0.2
     split_idx = int(train_ratio * n)
-    train_df = df[:split_idx].copy()  # Use copy to avoid warnings
+    train_df = df[:split_idx].copy()  # Use copy to avoid SettingWithCopyWarning
     test_df = df[split_idx:].copy()
     
-    print(f"Training set size: {len(train_df)}, Test set size: {len(test_df)}")
+    print(f"Dataset split - Training set size: {len(train_df)}, Test set size: {len(test_df)}")
     
-    # 2. Standardization: fit only on training set (critical fix: avoid data leakage)
+    # Step 2: Standardization - Fit scalers ONLY on training data
     scalerx = StandardScaler()
     scalery = StandardScaler()
     
-    # Important: fit only on training set
+    # CRITICAL: Only fit on training data to prevent data leakage
     scaler_x = scalerx.fit(train_df[['Aggregate']])
     scaler_y = scalery.fit(train_df[[appliance]])
     
-    # Transform separately
+    # Transform training data
     train_df['Aggregate'] = scaler_x.transform(train_df[['Aggregate']])
     train_df[appliance] = scaler_y.transform(train_df[[appliance]])
     
-    # Test set uses training set's scaler to transform (must not refit!)
+    # Transform test data using training scalers (DO NOT refit!)
     test_df['Aggregate'] = scaler_x.transform(test_df[['Aggregate']])
     test_df[appliance] = scaler_y.transform(test_df[[appliance]])
-
-    # 3. Create supervised learning dataset
-    print("Creating supervised learning dataset (this may take a while for large datasets)...")
+    
+    # Step 3: Create supervised learning datasets
     train_ds = series_to_supervised(train_df,
                                     n_in=576,
                                     rate_in=1,
@@ -263,33 +179,53 @@ def construct_dataset(df, appliance, batchsize=64, max_rows=None, memory_limit_m
                                     sel_out=[appliance])
 
     test_ds = series_to_supervised(test_df,
-                                n_in=576,
-                                rate_in=1,
-                                sel_in=['Aggregate'],
-                                sel_out=[appliance])
-
-    print(f"Supervised learning - Training samples: {len(train_ds)}, Test samples: {len(test_ds)}")
-    print(f"Generated data shape: {train_ds.shape}")  # Should be (num_samples, 1152)
+                                    n_in=576,
+                                    rate_in=1,
+                                    sel_in=['Aggregate'],
+                                    sel_out=[appliance])
     
-    # Clean up intermediate dataframes to free memory
-    del train_df, test_df
-    import gc
-    gc.collect()
-
-    # 4. Create dataset
+    print(f"Supervised learning - Training samples: {len(train_ds)}, Test samples: {len(test_ds)}")
+    print(f"Generated data shape: {train_ds.shape}")  # Should be (samples, 1152) = (samples, 576*2)
+    
+    # Step 4: Create PyTorch datasets
     train_ds = NormalDataset(train_ds.values)
     test_ds = NormalDataset(test_ds.values)
-
-    print(f"Final - Training samples: {len(train_ds)}, Test samples: {len(test_ds)}")
+    
+    print(f"Final dataset - Training samples: {len(train_ds)}, Test samples: {len(test_ds)}")
     print(f"Input dimension: {train_ds.x[0].shape}, Output dimension: {train_ds.y[0].shape}")
-
-    # 5. Create DataLoader
+    
+    # Step 5: Create DataLoaders
     input_dim = train_ds.x[0].shape[-1]
-
+    
     train_dataloader = data.DataLoader(train_ds, batch_size=batchsize, shuffle=True)
     val_batchsize = max(1, min(batchsize, len(test_ds)))
     test_dataloader = data.DataLoader(test_ds, batch_size=val_batchsize, shuffle=False)
+    
     del test_ds
     torch.cuda.empty_cache()
+    
     return train_dataloader, test_dataloader, scaler_y, input_dim, train_ds, scaler_x
+
+
+def verify_batch_shapes(train_dataloader, test_dataloader):
+    """
+    Debug function to verify batch shapes are correct.
+    Expected: Batch input shape: torch.Size([batch_size, 576])
+              Batch output shape: torch.Size([batch_size, 576])
+    """
+    print("\n=== Verifying Batch Shapes ===")
+    
+    # Check training batches
+    for x, y in train_dataloader:
+        print(f"Training batch - Input shape: {x.shape}, Output shape: {y.shape}")
+        print(f"Expected: Input torch.Size([{x.shape[0]}, 576]), Output torch.Size([{y.shape[0]}, 576])")
+        break
+    
+    # Check test batches
+    for x, y in test_dataloader:
+        print(f"Test batch - Input shape: {x.shape}, Output shape: {y.shape}")
+        print(f"Expected: Input torch.Size([{x.shape[0]}, 576]), Output torch.Size([{y.shape[0]}, 576])")
+        break
+    
+    print("=== Batch Shape Verification Complete ===\n")
  

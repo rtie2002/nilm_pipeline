@@ -10,14 +10,24 @@ from matplotlib import pyplot as plt
 # Assume your CNN model is defined in model.py
 from model import CNN
 
-def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=None):
-
+def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=None, learning_rate=1e-4):
+    """
+    Train the model with proper validation.
+    
+    Args:
+        model: PyTorch model to train
+        train_dataloader: Training data loader
+        val_dataloader: Validation data loader
+        num_epochs: Number of training epochs
+        scaler_y: StandardScaler for inverse transforming predictions (optional)
+        learning_rate: Initial learning rate (default: 1e-4, recommended for regression)
+    """
     # Select Device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Use Adam as optimizer (lower learning rate to avoid overfitting)
-    # Add weight decay for regularization
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-5)
+    # Use Adam as optimizer with configurable learning rate
+    # Lower learning rate (1e-4) is recommended for regression tasks to prevent overfitting
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=0.5, patience=5
     )
@@ -27,10 +37,6 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=No
 
     best_model_wts = copy.deepcopy(model.state_dict())
     best_loss = float('inf')  # Initialize best loss to a very large number
-    
-    # Early stopping mechanism
-    early_stop_patience = 10
-    early_stop_counter = 0
 
     # Loss Lists
     train_loss_all = []
@@ -71,8 +77,6 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=No
             # Backward Pass and Optimize
             optimizer.zero_grad()
             loss.backward()
-            # Gradient clipping: prevent gradient explosion
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
 
             # Statistics
@@ -135,17 +139,8 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=No
         if epoch_val_loss < best_loss:
             best_loss = epoch_val_loss
             best_model_wts = copy.deepcopy(model.state_dict())
-            early_stop_counter = 0  # Reset early stopping counter
-        else:
-            early_stop_counter += 1  # Validation loss didn't improve, increment counter
 
         scheduler.step(epoch_val_loss)
-
-        # Early stopping check
-        if early_stop_counter >= early_stop_patience:
-            print(f"\nEarly stopping triggered: validation loss didn't improve for {early_stop_patience} consecutive epochs")
-            print(f"Best validation loss: {best_loss:.4f} (at epoch {epoch - early_stop_patience + 1})")
-            break
 
         if device.type == "cuda":
             torch.cuda.empty_cache()
@@ -161,9 +156,7 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=No
     torch.save(model.state_dict(), 'best_model.pth')
 
     # Create a DataFrame from the recorded losses
-    # Use actual number of epochs trained (may be less than num_epochs due to early stopping)
-    actual_epochs = len(train_loss_all)
-    process_dict = {"Epoch": list(range(1, actual_epochs + 1)),
+    process_dict = {"Epoch": list(range(1, num_epochs + 1)),
                     "Train_Loss": train_loss_all,
                     "Val_Loss": val_loss_all}
     if val_rmse_all:
