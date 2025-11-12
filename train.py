@@ -16,7 +16,7 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs):
     # Use Adam as optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=5, verbose=True
+        optimizer, mode="min", factor=0.5, patience=5
     )
     criterion = nn.MSELoss()  # Standard loss for regression
 
