@@ -100,15 +100,15 @@ def choose_data(dataset, appliance):
     print(csv_files_with_column)
     return csv_files_with_column
 
-def merge_dataframes(dataframes, max_rows_per_df=50000, max_total_rows=200000, random_sample=True):
+def merge_dataframes_smart(dataframes, target_total_rows=None, memory_limit_mb=8000):
     """
-    Merge multiple dataframes into a single dataframe with optional sampling.
+    Intelligently merge dataframes using all data while managing memory.
+    Automatically calculates optimal sampling to use maximum data within memory limits.
     
     Args:
         dataframes: List of pandas DataFrames to merge
-        max_rows_per_df: Maximum number of rows to use from each dataframe (default: 50000)
-        max_total_rows: Maximum total rows in merged dataframe (default: 200000)
-        random_sample: If True, randomly sample rows; if False, take first N rows
+        target_total_rows: Target total rows (None = use all data, but respect memory limit)
+        memory_limit_mb: Approximate memory limit in MB (default: 8000MB = 8GB)
         
     Returns:
         Merged DataFrame
@@ -116,34 +116,53 @@ def merge_dataframes(dataframes, max_rows_per_df=50000, max_total_rows=200000, r
     if not dataframes:
         raise ValueError("No dataframes provided")
     
-    # Warn if no limits set
-    if max_rows_per_df is None and max_total_rows is None:
-        print("WARNING: No row limits set! This may cause memory issues with large datasets.")
-        print("Consider setting max_rows_per_df and max_total_rows parameters.")
+    total_available = sum(len(df) for df in dataframes)
+    print(f"Total available rows across all dataframes: {total_available:,}")
+    
+    # Estimate memory usage: each row ~0.0002 MB (2 columns, float64)
+    # After series_to_supervised: each row becomes ~0.23 MB (1152 columns)
+    # Add 50% buffer for intermediate operations
+    rows_per_mb = memory_limit_mb / (0.23 * 1.5)
+    max_safe_rows = int(rows_per_mb)
+    
+    if target_total_rows is None:
+        # Use all data if it fits in memory, otherwise use max safe amount
+        if total_available <= max_safe_rows:
+            target_total_rows = total_available
+            print(f"All data fits in memory ({total_available:,} rows)")
+        else:
+            target_total_rows = max_safe_rows
+            print(f"Data too large for memory. Using {target_total_rows:,} rows (max safe: {max_safe_rows:,})")
+            print(f"This uses {target_total_rows/total_available*100:.1f}% of available data")
+    else:
+        if target_total_rows > max_safe_rows:
+            print(f"WARNING: Requested {target_total_rows:,} rows may exceed memory limit")
+            print(f"Recommended maximum: {max_safe_rows:,} rows")
+            target_total_rows = min(target_total_rows, max_safe_rows)
+    
+    # Calculate rows per dataframe to achieve target
+    num_dataframes = len(dataframes)
+    rows_per_df = target_total_rows // num_dataframes
     
     sampled_dfs = []
     for i, df in enumerate(dataframes):
-        df_sample = df.copy()
-        
-        # Sample from each dataframe if specified
-        if max_rows_per_df is not None and len(df_sample) > max_rows_per_df:
-            if random_sample:
-                df_sample = df_sample.sample(n=max_rows_per_df, random_state=42).reset_index(drop=True)
-            else:
-                df_sample = df_sample.head(max_rows_per_df).reset_index(drop=True)
-            print(f"DataFrame {i}: sampled {len(df_sample)} rows from {len(df)} total rows")
-        
-        sampled_dfs.append(df_sample)
+        df_size = len(df)
+        if df_size <= rows_per_df:
+            # Use all rows if dataframe is smaller than target
+            sampled_dfs.append(df.copy())
+            print(f"DataFrame {i}: using all {df_size:,} rows")
+        else:
+            # Sample proportionally
+            df_sample = df.sample(n=rows_per_df, random_state=42).reset_index(drop=True)
+            sampled_dfs.append(df_sample)
+            print(f"DataFrame {i}: sampled {rows_per_df:,} rows from {df_size:,} total ({rows_per_df/df_size*100:.1f}%)")
     
     merged_df = pd.concat(sampled_dfs, ignore_index=True)
     
-    # Apply total row limit if specified
-    if max_total_rows is not None and len(merged_df) > max_total_rows:
-        if random_sample:
-            merged_df = merged_df.sample(n=max_total_rows, random_state=42).reset_index(drop=True)
-        else:
-            merged_df = merged_df.head(max_total_rows).reset_index(drop=True)
-        print(f"Total rows limited to {max_total_rows}")
+    # Final check and limit if needed
+    if len(merged_df) > target_total_rows:
+        merged_df = merged_df.sample(n=target_total_rows, random_state=42).reset_index(drop=True)
+        print(f"Final sampling: limited to {target_total_rows:,} rows")
     
     print(f"Merged {len(dataframes)} dataframes into one with shape: {merged_df.shape}")
     return merged_df
@@ -189,16 +208,25 @@ def series_to_supervised(data: pd.DataFrame,
     agg.index = range(len(agg))
     return agg
 
-def construct_dataset(df, appliance, batchsize=64, max_rows=200000):
+def construct_dataset(df, appliance, batchsize=64, max_rows=None, memory_limit_mb=8000):
 
-    # 0. Limit total rows to prevent memory issues (default: 200000 rows)
+    # 0. Intelligently limit rows based on memory if needed
+    if max_rows is None:
+        # Auto-calculate max_rows based on memory limit
+        # After series_to_supervised: each row becomes ~0.23 MB (1152 columns)
+        # Add 50% buffer for intermediate operations
+        rows_per_mb = memory_limit_mb / (0.23 * 1.5)
+        max_rows = int(rows_per_mb)
+        print(f"Auto-calculated max_rows: {max_rows:,} based on {memory_limit_mb}MB memory limit")
+    
+    # Limit total rows to prevent memory issues
     # Note: series_to_supervised will create windows, so actual samples will be less
     if len(df) > max_rows:
-        print(f"WARNING: Input dataframe has {len(df)} rows, limiting to {max_rows} to prevent memory issues")
+        print(f"WARNING: Input dataframe has {len(df):,} rows, limiting to {max_rows:,} to prevent memory issues")
         df = df.sample(n=max_rows, random_state=42).reset_index(drop=True)
-        print(f"Limited input dataframe to {max_rows} rows")
+        print(f"Limited input dataframe to {max_rows:,} rows")
     else:
-        print(f"Input dataframe has {len(df)} rows (within limit)")
+        print(f"Input dataframe has {len(df):,} rows (within limit)")
     
     # 1. Split dataset first (to avoid data leakage)
     n = len(df)
