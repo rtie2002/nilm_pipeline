@@ -14,7 +14,10 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Use Adam as optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=5, verbose=True
+    )
     criterion = nn.MSELoss()  # Standard loss for regression
 
     model = model.to(device)
@@ -76,8 +79,8 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs):
                 val_num += b_x.size(0)
 
         # Calculate average losses for the epoch
-        epoch_train_loss = train_loss / train_num
-        epoch_val_loss = val_loss / val_num
+        epoch_train_loss = train_loss / max(train_num, 1)
+        epoch_val_loss = val_loss / max(val_num, 1)
         train_loss_all.append(epoch_train_loss)
         val_loss_all.append(epoch_val_loss)
 
@@ -88,6 +91,8 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs):
         if epoch_val_loss < best_loss:
             best_loss = epoch_val_loss
             best_model_wts = copy.deepcopy(model.state_dict())
+
+        scheduler.step(epoch_val_loss)
 
     # Time spent for training
     time_use = time.time() - since

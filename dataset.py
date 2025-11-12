@@ -26,8 +26,9 @@ def setup_seed(seed: int = 1234):
 class NormalDataset(data.Dataset):
 
     def __init__(self, data):
-        self.x = torch.from_numpy(data).float()[:, :-576].to(device)
-        self.y = torch.from_numpy(data).float()[:, -576:].to(device)
+        tensor = torch.from_numpy(data).float()
+        self.x = tensor[:, :-576]
+        self.y = tensor[:, -576:]
 
     def __len__(self):
         return len(self.x)
@@ -36,27 +37,42 @@ class NormalDataset(data.Dataset):
         return self.x[idx], self.y[idx]
     
 
+def _glob_sorted(path: str, pattern: str):
+    return sorted(glob.glob(os.path.join(path, pattern)))
+
+
+def _resolve_single(path: str, pattern: str) -> str:
+    matches = _glob_sorted(path, pattern)
+    if not matches:
+        raise FileNotFoundError(f"No files found for pattern '{pattern}' under '{path}'")
+    return matches[0]
+
+
 def load_data(path, postfix, appliance, choose=None):
-    files = sorted(glob.glob(path + postfix))
+    files = _glob_sorted(path, postfix)
     if type(choose) is int:
+        if choose < 0 or choose >= len(files):
+            raise IndexError(f"Index {choose} is out of range for {len(files)} files")
         print(f"building: {files[choose]}")
         df = pd.read_csv(files[choose], usecols=['Aggregate', appliance])
         return df
     elif type(choose) is str:
-        file = glob.glob(path + choose + postfix)[0]
+        file = _resolve_single(path, choose + postfix)
         df = pd.read_csv(file, usecols=['Aggregate', appliance])
         return df
     elif type(choose) is list:
         dfs = []
         for file_name in choose:
-            # Construct the full file path
-            full_file_path = os.path.join(path, file_name + postfix.lstrip('*'))
-            print(f"Attempting to load file: {full_file_path}")
-            if os.path.exists(full_file_path):
-                dfs.append(pd.read_csv(full_file_path, usecols=['Aggregate', appliance]))
+            if isinstance(file_name, int):
+                if file_name < 0 or file_name >= len(files):
+                    raise IndexError(f"Index {file_name} is out of range for {len(files)} files")
+                print(f"building: {files[file_name]}")
+                dfs.append(pd.read_csv(files[file_name], usecols=['Aggregate', appliance]))
+            elif isinstance(file_name, str):
+                resolved = _resolve_single(path, file_name + postfix)
+                dfs.append(pd.read_csv(resolved, usecols=['Aggregate', appliance]))
             else:
-                print(f"File not found: {full_file_path}")
-                # You might want to handle this case differently, e.g., raise an error or skip the file
+                raise TypeError("Entries in 'choose' must be int indices or str patterns")
         return dfs
     elif choose is None:
         random_choose = np.random.randint(0, len(files))
@@ -140,9 +156,9 @@ def construct_dataset(df, appliance, batchsize=64):
     n = len(df)
     train_ratio = 0.8
     test_ratio = 0.2
-    train_df = df[int(0*n):int(train_ratio*n)] # Get data from 0% to 80%
-    test_df = df[int(test_ratio*n):int(1*n)]   # Get data from 80% to 100%
-    # print(int(0.8*n))
+    split_idx = int(train_ratio * n)
+    train_df = df[:split_idx]
+    test_df = df[split_idx:]
 
     train_ds = series_to_supervised(train_df,
                                     n_in=576,
@@ -156,14 +172,8 @@ def construct_dataset(df, appliance, batchsize=64):
                                 sel_in=['Aggregate'],
                                 sel_out=[appliance])
 
-    train_ds = train_ds.values
-    test_ds = test_ds.values
-    train_ds = train_ds[::10, :]
-    test_ds = test_ds[::10, :]
-
-
-    train_ds = NormalDataset(train_ds)
-    test_ds = NormalDataset(test_ds)
+    train_ds = NormalDataset(train_ds.values)
+    test_ds = NormalDataset(test_ds.values)
 
     input_dim = train_ds.x[0].shape[-1]
 
