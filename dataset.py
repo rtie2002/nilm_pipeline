@@ -143,23 +143,33 @@ def series_to_supervised(data: pd.DataFrame,
 
 def construct_dataset(df, appliance, batchsize=64):
 
-    # Standardization
-    scalerx = StandardScaler()
-    scalery = StandardScaler()
-    scaler_x = scalerx.fit(df[['Aggregate']])
-    scaler_y = scalery.fit(df[[appliance]])
-
-    df['Aggregate'] = scaler_x.transform(df[['Aggregate']])
-    df[appliance] = scaler_y.transform(df[[appliance]])
-
-    #Split the dataset
+    # 1. 先划分数据集（避免数据泄露）
     n = len(df)
     train_ratio = 0.8
     test_ratio = 0.2
     split_idx = int(train_ratio * n)
-    train_df = df[:split_idx]
-    test_df = df[split_idx:]
+    train_df = df[:split_idx].copy()  # 使用copy避免警告
+    test_df = df[split_idx:].copy()
+    
+    print(f"训练集大小: {len(train_df)}, 测试集大小: {len(test_df)}")
+    
+    # 2. 标准化：只在训练集上fit（关键修复：避免数据泄露）
+    scalerx = StandardScaler()
+    scalery = StandardScaler()
+    
+    # 重要：只在训练集上fit
+    scaler_x = scalerx.fit(train_df[['Aggregate']])
+    scaler_y = scalery.fit(train_df[[appliance]])
+    
+    # 分别transform
+    train_df['Aggregate'] = scaler_x.transform(train_df[['Aggregate']])
+    train_df[appliance] = scaler_y.transform(train_df[[appliance]])
+    
+    # 测试集用训练集的scaler来transform（不能重新fit！）
+    test_df['Aggregate'] = scaler_x.transform(test_df[['Aggregate']])
+    test_df[appliance] = scaler_y.transform(test_df[[appliance]])
 
+    # 3. 创建监督学习数据集
     train_ds = series_to_supervised(train_df,
                                     n_in=576,
                                     rate_in=1,
@@ -172,9 +182,17 @@ def construct_dataset(df, appliance, batchsize=64):
                                 sel_in=['Aggregate'],
                                 sel_out=[appliance])
 
+    print(f"监督学习 - 训练样本数: {len(train_ds)}, 测试样本数: {len(test_ds)}")
+    print(f"生成数据的形状: {train_ds.shape}")  # 应该是 (样本数, 1152)
+
+    # 4. 创建数据集
     train_ds = NormalDataset(train_ds.values)
     test_ds = NormalDataset(test_ds.values)
 
+    print(f"最终 - 训练样本数: {len(train_ds)}, 测试样本数: {len(test_ds)}")
+    print(f"输入维度: {train_ds.x[0].shape}, 输出维度: {train_ds.y[0].shape}")
+
+    # 5. 创建DataLoader
     input_dim = train_ds.x[0].shape[-1]
 
     train_dataloader = data.DataLoader(train_ds, batch_size=batchsize, shuffle=True)

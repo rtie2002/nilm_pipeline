@@ -15,8 +15,8 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=No
     # Select Device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Use Adam as optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    # Use Adam as optimizer (降低学习率以避免过拟合)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=0.5, patience=5
     )
@@ -26,6 +26,10 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=No
 
     best_model_wts = copy.deepcopy(model.state_dict())
     best_loss = float('inf')  # Initialize best loss to a very large number
+    
+    # 早停机制
+    early_stop_patience = 10
+    early_stop_counter = 0
 
     # Loss Lists
     train_loss_all = []
@@ -66,6 +70,8 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=No
             # Backward Pass and Optimize
             optimizer.zero_grad()
             loss.backward()
+            # 梯度裁剪：防止梯度爆炸
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
 
             # Statistics
@@ -128,8 +134,17 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=No
         if epoch_val_loss < best_loss:
             best_loss = epoch_val_loss
             best_model_wts = copy.deepcopy(model.state_dict())
+            early_stop_counter = 0  # 重置早停计数器
+        else:
+            early_stop_counter += 1  # 验证损失没有改善，增加计数器
 
         scheduler.step(epoch_val_loss)
+
+        # 早停检查
+        if early_stop_counter >= early_stop_patience:
+            print(f"\n早停触发：验证损失连续 {early_stop_patience} 个epoch没有改善")
+            print(f"最佳验证损失: {best_loss:.4f} (在epoch {epoch - early_stop_patience + 1})")
+            break
 
         if device.type == "cuda":
             torch.cuda.empty_cache()
@@ -145,7 +160,9 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=No
     torch.save(model.state_dict(), 'best_model.pth')
 
     # Create a DataFrame from the recorded losses
-    process_dict = {"Epoch": list(range(1, num_epochs + 1)),
+    # 使用实际训练的epoch数（可能因为早停而少于num_epochs）
+    actual_epochs = len(train_loss_all)
+    process_dict = {"Epoch": list(range(1, actual_epochs + 1)),
                     "Train_Loss": train_loss_all,
                     "Val_Loss": val_loss_all}
     if val_rmse_all:
