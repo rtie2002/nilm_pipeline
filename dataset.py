@@ -158,8 +158,8 @@ def construct_dataset(df, appliance, batchsize=64):
 
     train_ds = train_ds.values
     test_ds = test_ds.values
-    train_ds = train_ds[::5, :]
-    test_ds = test_ds[::5, :]
+    train_ds = train_ds[::10, :]
+    test_ds = test_ds[::10, :]
 
 
     train_ds = NormalDataset(train_ds)
