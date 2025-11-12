@@ -100,14 +100,14 @@ def choose_data(dataset, appliance):
     print(csv_files_with_column)
     return csv_files_with_column
 
-def merge_dataframes(dataframes, max_rows_per_df=None, max_total_rows=None, random_sample=True):
+def merge_dataframes(dataframes, max_rows_per_df=50000, max_total_rows=200000, random_sample=True):
     """
     Merge multiple dataframes into a single dataframe with optional sampling.
     
     Args:
         dataframes: List of pandas DataFrames to merge
-        max_rows_per_df: Maximum number of rows to use from each dataframe (None = use all)
-        max_total_rows: Maximum total rows in merged dataframe (None = no limit)
+        max_rows_per_df: Maximum number of rows to use from each dataframe (default: 50000)
+        max_total_rows: Maximum total rows in merged dataframe (default: 200000)
         random_sample: If True, randomly sample rows; if False, take first N rows
         
     Returns:
@@ -115,6 +115,11 @@ def merge_dataframes(dataframes, max_rows_per_df=None, max_total_rows=None, rand
     """
     if not dataframes:
         raise ValueError("No dataframes provided")
+    
+    # Warn if no limits set
+    if max_rows_per_df is None and max_total_rows is None:
+        print("WARNING: No row limits set! This may cause memory issues with large datasets.")
+        print("Consider setting max_rows_per_df and max_total_rows parameters.")
     
     sampled_dfs = []
     for i, df in enumerate(dataframes):
@@ -184,12 +189,16 @@ def series_to_supervised(data: pd.DataFrame,
     agg.index = range(len(agg))
     return agg
 
-def construct_dataset(df, appliance, batchsize=64, max_rows=None):
+def construct_dataset(df, appliance, batchsize=64, max_rows=200000):
 
-    # 0. Optional: Limit total rows to prevent memory issues
-    if max_rows is not None and len(df) > max_rows:
+    # 0. Limit total rows to prevent memory issues (default: 200000 rows)
+    # Note: series_to_supervised will create windows, so actual samples will be less
+    if len(df) > max_rows:
+        print(f"WARNING: Input dataframe has {len(df)} rows, limiting to {max_rows} to prevent memory issues")
         df = df.sample(n=max_rows, random_state=42).reset_index(drop=True)
         print(f"Limited input dataframe to {max_rows} rows")
+    else:
+        print(f"Input dataframe has {len(df)} rows (within limit)")
     
     # 1. Split dataset first (to avoid data leakage)
     n = len(df)
