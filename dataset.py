@@ -178,7 +178,8 @@ def construct_dataset(df, appliance, batchsize=64):
     input_dim = train_ds.x[0].shape[-1]
 
     train_dataloader = data.DataLoader(train_ds, batch_size=batchsize, shuffle=True)
-    test_dataloader = data.DataLoader(test_ds, batch_size=len(test_ds), shuffle=False)
+    val_batchsize = max(1, min(batchsize, len(test_ds)))
+    test_dataloader = data.DataLoader(test_ds, batch_size=val_batchsize, shuffle=False)
     del test_ds
     torch.cuda.empty_cache()
     return train_dataloader, test_dataloader, scaler_y, input_dim, train_ds, scaler_x

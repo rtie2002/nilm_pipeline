@@ -94,6 +94,9 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs):
 
         scheduler.step(epoch_val_loss)
 
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+
     # Time spent for training
     time_use = time.time() - since
     print("Training complete in {:.0f}m {:.0f}s".format(time_use // 60, time_use % 60))
