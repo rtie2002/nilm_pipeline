@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
+from tqdm.auto import tqdm
 import time
 import copy
 import pandas as pd
@@ -47,7 +48,12 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=No
 
         # -------------------- Training Phase --------------------
         model.train()  # Set model to training mode
-        for step, (b_x, b_y) in enumerate(train_dataloader):
+        train_bar = tqdm(
+            train_dataloader,
+            desc=f"Train Epoch {epoch + 1}/{num_epochs}",
+            leave=False,
+        )
+        for step, (b_x, b_y) in enumerate(train_bar, start=1):
             b_x = b_x.to(device)
             b_y = b_y.to(device)
 
@@ -55,7 +61,7 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=No
             output = model(b_x)
             # Calculate Loss
             loss = criterion(output, b_y)
-            print(f"    [Train] Step {step + 1}/{len(train_dataloader)} Loss: {loss.item():.4f}")
+            train_bar.set_postfix(loss=f"{loss.item():.4f}")
 
             # Backward Pass and Optimize
             optimizer.zero_grad()
@@ -71,7 +77,12 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=No
         val_preds = []
         val_targets = []
         with torch.no_grad():  # Disable gradient computation for efficiency
-            for step, (b_x, b_y) in enumerate(val_dataloader):
+            val_bar = tqdm(
+                val_dataloader,
+                desc=f"Val   Epoch {epoch + 1}/{num_epochs}",
+                leave=False,
+            )
+            for step, (b_x, b_y) in enumerate(val_bar, start=1):
                 b_x = b_x.to(device)
                 b_y = b_y.to(device)
 
@@ -79,7 +90,7 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=No
                 output = model(b_x)
                 # Calculate Loss
                 loss = criterion(output, b_y)
-                print(f"    [Val] Step {step + 1}/{len(val_dataloader)} Loss: {loss.item():.4f}")
+                val_bar.set_postfix(loss=f"{loss.item():.4f}")
 
                 # Statistics
                 val_loss += loss.item() * b_x.size(0)
