@@ -97,7 +97,7 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs):
     # Load best model weights
     model.load_state_dict(best_model_wts)
     # Save the best model
-    torch.save(model.state_dict(), 'NILM_PIPELINE/best_model.pth')
+    torch.save(model.state_dict(), 'best_model.pth')
 
     # Create a DataFrame from the recorded losses
     train_process = pd.DataFrame(data={"Epoch": range(num_epochs),
