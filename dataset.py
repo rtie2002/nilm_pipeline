@@ -100,6 +100,23 @@ def choose_data(dataset, appliance):
     print(csv_files_with_column)
     return csv_files_with_column
 
+def merge_dataframes(dataframes):
+    """
+    Merge multiple dataframes into a single dataframe.
+    
+    Args:
+        dataframes: List of pandas DataFrames to merge
+        
+    Returns:
+        Merged DataFrame
+    """
+    if not dataframes:
+        raise ValueError("No dataframes provided")
+    
+    merged_df = pd.concat(dataframes, ignore_index=True)
+    print(f"Merged {len(dataframes)} dataframes into one with shape: {merged_df.shape}")
+    return merged_df
+
 def series_to_supervised(data: pd.DataFrame,
                          n_in: int = 1,
                          rate_in: int = 1,
@@ -143,33 +160,33 @@ def series_to_supervised(data: pd.DataFrame,
 
 def construct_dataset(df, appliance, batchsize=64):
 
-    # 1. 先划分数据集（避免数据泄露）
+    # 1. Split dataset first (to avoid data leakage)
     n = len(df)
     train_ratio = 0.8
     test_ratio = 0.2
     split_idx = int(train_ratio * n)
-    train_df = df[:split_idx].copy()  # 使用copy避免警告
+    train_df = df[:split_idx].copy()  # Use copy to avoid warnings
     test_df = df[split_idx:].copy()
     
-    print(f"训练集大小: {len(train_df)}, 测试集大小: {len(test_df)}")
+    print(f"Training set size: {len(train_df)}, Test set size: {len(test_df)}")
     
-    # 2. 标准化：只在训练集上fit（关键修复：避免数据泄露）
+    # 2. Standardization: fit only on training set (critical fix: avoid data leakage)
     scalerx = StandardScaler()
     scalery = StandardScaler()
     
-    # 重要：只在训练集上fit
+    # Important: fit only on training set
     scaler_x = scalerx.fit(train_df[['Aggregate']])
     scaler_y = scalery.fit(train_df[[appliance]])
     
-    # 分别transform
+    # Transform separately
     train_df['Aggregate'] = scaler_x.transform(train_df[['Aggregate']])
     train_df[appliance] = scaler_y.transform(train_df[[appliance]])
     
-    # 测试集用训练集的scaler来transform（不能重新fit！）
+    # Test set uses training set's scaler to transform (must not refit!)
     test_df['Aggregate'] = scaler_x.transform(test_df[['Aggregate']])
     test_df[appliance] = scaler_y.transform(test_df[[appliance]])
 
-    # 3. 创建监督学习数据集
+    # 3. Create supervised learning dataset
     train_ds = series_to_supervised(train_df,
                                     n_in=576,
                                     rate_in=1,
@@ -182,17 +199,17 @@ def construct_dataset(df, appliance, batchsize=64):
                                 sel_in=['Aggregate'],
                                 sel_out=[appliance])
 
-    print(f"监督学习 - 训练样本数: {len(train_ds)}, 测试样本数: {len(test_ds)}")
-    print(f"生成数据的形状: {train_ds.shape}")  # 应该是 (样本数, 1152)
+    print(f"Supervised learning - Training samples: {len(train_ds)}, Test samples: {len(test_ds)}")
+    print(f"Generated data shape: {train_ds.shape}")  # Should be (num_samples, 1152)
 
-    # 4. 创建数据集
+    # 4. Create dataset
     train_ds = NormalDataset(train_ds.values)
     test_ds = NormalDataset(test_ds.values)
 
-    print(f"最终 - 训练样本数: {len(train_ds)}, 测试样本数: {len(test_ds)}")
-    print(f"输入维度: {train_ds.x[0].shape}, 输出维度: {train_ds.y[0].shape}")
+    print(f"Final - Training samples: {len(train_ds)}, Test samples: {len(test_ds)}")
+    print(f"Input dimension: {train_ds.x[0].shape}, Output dimension: {train_ds.y[0].shape}")
 
-    # 5. 创建DataLoader
+    # 5. Create DataLoader
     input_dim = train_ds.x[0].shape[-1]
 
     train_dataloader = data.DataLoader(train_ds, batch_size=batchsize, shuffle=True)
