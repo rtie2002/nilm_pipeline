@@ -52,6 +52,7 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs):
             output = model(b_x)
             # Calculate Loss
             loss = criterion(output, b_y)
+            print(f"    [Train] Step {step + 1}/{len(train_dataloader)} Loss: {loss.item():.4f}")
 
             # Backward Pass and Optimize
             optimizer.zero_grad()
@@ -73,6 +74,7 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs):
                 output = model(b_x)
                 # Calculate Loss
                 loss = criterion(output, b_y)
+                print(f"    [Val] Step {step + 1}/{len(val_dataloader)} Loss: {loss.item():.4f}")
 
                 # Statistics
                 val_loss += loss.item() * b_x.size(0)
