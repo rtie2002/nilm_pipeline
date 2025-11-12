@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 import time
 import copy
 import pandas as pd
@@ -8,7 +9,7 @@ from matplotlib import pyplot as plt
 # Assume your CNN model is defined in model.py
 from model import CNN
 
-def train_model(model, train_dataloader, val_dataloader, num_epochs):
+def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=None):
 
     # Select Device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -28,6 +29,8 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs):
     # Loss Lists
     train_loss_all = []
     val_loss_all = []
+    val_rmse_all = []
+    val_mae_all = []
 
     # Current Time
     since = time.time()
@@ -65,6 +68,8 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs):
 
         # -------------------- Validation Phase --------------------
         model.eval()  # Set model to evaluation mode
+        val_preds = []
+        val_targets = []
         with torch.no_grad():  # Disable gradient computation for efficiency
             for step, (b_x, b_y) in enumerate(val_dataloader):
                 b_x = b_x.to(device)
@@ -79,6 +84,9 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs):
                 # Statistics
                 val_loss += loss.item() * b_x.size(0)
                 val_num += b_x.size(0)
+                if scaler_y is not None:
+                    val_preds.append(output.detach().cpu())
+                    val_targets.append(b_y.detach().cpu())
 
         # Calculate average losses for the epoch
         epoch_train_loss = train_loss / max(train_num, 1)
@@ -86,8 +94,24 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs):
         train_loss_all.append(epoch_train_loss)
         val_loss_all.append(epoch_val_loss)
 
+        epoch_val_rmse = None
+        epoch_val_mae = None
+        if scaler_y is not None and val_preds:
+            preds_np = torch.cat(val_preds).numpy()
+            targets_np = torch.cat(val_targets).numpy()
+            preds_real = scaler_y.inverse_transform(preds_np)
+            targets_real = scaler_y.inverse_transform(targets_np)
+            diff = preds_real - targets_real
+            epoch_val_rmse = float(np.sqrt(np.mean(diff ** 2)))
+            epoch_val_mae = float(np.mean(np.abs(diff)))
+            val_rmse_all.append(epoch_val_rmse)
+            val_mae_all.append(epoch_val_mae)
+
         print(f"{epoch} Train Loss: {epoch_train_loss:.4f}")
         print(f"{epoch} Val Loss: {epoch_val_loss:.4f}")
+        if epoch_val_rmse is not None:
+            print(f"{epoch} Val RMSE (real units): {epoch_val_rmse:.4f}")
+            print(f"{epoch} Val MAE (real units): {epoch_val_mae:.4f}")
 
         # Deep copy the model if it has the best validation loss so far
         if epoch_val_loss < best_loss:
@@ -110,9 +134,13 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs):
     torch.save(model.state_dict(), 'best_model.pth')
 
     # Create a DataFrame from the recorded losses
-    train_process = pd.DataFrame(data={"Epoch": range(num_epochs),
-                                       "Train_Loss": train_loss_all,
-                                       "Val_Loss": val_loss_all})
+    process_dict = {"Epoch": range(num_epochs),
+                    "Train_Loss": train_loss_all,
+                    "Val_Loss": val_loss_all}
+    if val_rmse_all:
+        process_dict["Val_RMSE_real"] = val_rmse_all
+        process_dict["Val_MAE_real"] = val_mae_all
+    train_process = pd.DataFrame(data=process_dict)
     
     return model, train_process
 
