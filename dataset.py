@@ -100,12 +100,15 @@ def choose_data(dataset, appliance):
     print(csv_files_with_column)
     return csv_files_with_column
 
-def merge_dataframes(dataframes):
+def merge_dataframes(dataframes, max_rows_per_df=None, max_total_rows=None, random_sample=True):
     """
-    Merge multiple dataframes into a single dataframe.
+    Merge multiple dataframes into a single dataframe with optional sampling.
     
     Args:
         dataframes: List of pandas DataFrames to merge
+        max_rows_per_df: Maximum number of rows to use from each dataframe (None = use all)
+        max_total_rows: Maximum total rows in merged dataframe (None = no limit)
+        random_sample: If True, randomly sample rows; if False, take first N rows
         
     Returns:
         Merged DataFrame
@@ -113,7 +116,30 @@ def merge_dataframes(dataframes):
     if not dataframes:
         raise ValueError("No dataframes provided")
     
-    merged_df = pd.concat(dataframes, ignore_index=True)
+    sampled_dfs = []
+    for i, df in enumerate(dataframes):
+        df_sample = df.copy()
+        
+        # Sample from each dataframe if specified
+        if max_rows_per_df is not None and len(df_sample) > max_rows_per_df:
+            if random_sample:
+                df_sample = df_sample.sample(n=max_rows_per_df, random_state=42).reset_index(drop=True)
+            else:
+                df_sample = df_sample.head(max_rows_per_df).reset_index(drop=True)
+            print(f"DataFrame {i}: sampled {len(df_sample)} rows from {len(df)} total rows")
+        
+        sampled_dfs.append(df_sample)
+    
+    merged_df = pd.concat(sampled_dfs, ignore_index=True)
+    
+    # Apply total row limit if specified
+    if max_total_rows is not None and len(merged_df) > max_total_rows:
+        if random_sample:
+            merged_df = merged_df.sample(n=max_total_rows, random_state=42).reset_index(drop=True)
+        else:
+            merged_df = merged_df.head(max_total_rows).reset_index(drop=True)
+        print(f"Total rows limited to {max_total_rows}")
+    
     print(f"Merged {len(dataframes)} dataframes into one with shape: {merged_df.shape}")
     return merged_df
 
@@ -158,8 +184,13 @@ def series_to_supervised(data: pd.DataFrame,
     agg.index = range(len(agg))
     return agg
 
-def construct_dataset(df, appliance, batchsize=64):
+def construct_dataset(df, appliance, batchsize=64, max_rows=None):
 
+    # 0. Optional: Limit total rows to prevent memory issues
+    if max_rows is not None and len(df) > max_rows:
+        df = df.sample(n=max_rows, random_state=42).reset_index(drop=True)
+        print(f"Limited input dataframe to {max_rows} rows")
+    
     # 1. Split dataset first (to avoid data leakage)
     n = len(df)
     train_ratio = 0.8
@@ -187,6 +218,7 @@ def construct_dataset(df, appliance, batchsize=64):
     test_df[appliance] = scaler_y.transform(test_df[[appliance]])
 
     # 3. Create supervised learning dataset
+    print("Creating supervised learning dataset (this may take a while for large datasets)...")
     train_ds = series_to_supervised(train_df,
                                     n_in=576,
                                     rate_in=1,
@@ -201,6 +233,11 @@ def construct_dataset(df, appliance, batchsize=64):
 
     print(f"Supervised learning - Training samples: {len(train_ds)}, Test samples: {len(test_ds)}")
     print(f"Generated data shape: {train_ds.shape}")  # Should be (num_samples, 1152)
+    
+    # Clean up intermediate dataframes to free memory
+    del train_df, test_df
+    import gc
+    gc.collect()
 
     # 4. Create dataset
     train_ds = NormalDataset(train_ds.values)
