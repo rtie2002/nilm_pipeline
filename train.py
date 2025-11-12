@@ -36,8 +36,8 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=No
     # Current Time
     since = time.time()
 
-    for epoch in range(num_epochs):
-        print("Epoch {}/{}".format(epoch, num_epochs - 1))
+    for epoch in range(1, num_epochs + 1):
+        print(f"Epoch {epoch}/{num_epochs}")
         print("-" * 10)
 
         # Initialize the Parameters
@@ -50,7 +50,7 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=No
         model.train()  # Set model to training mode
         train_bar = tqdm(
             train_dataloader,
-            desc=f"Train Epoch {epoch + 1}/{num_epochs}",
+            desc=f"Train Epoch {epoch}/{num_epochs}",
             leave=False,
         )
         for step, (b_x, b_y) in enumerate(train_bar, start=1):
@@ -79,7 +79,7 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=No
         with torch.no_grad():  # Disable gradient computation for efficiency
             val_bar = tqdm(
                 val_dataloader,
-                desc=f"Val   Epoch {epoch + 1}/{num_epochs}",
+                desc=f"Val   Epoch {epoch}/{num_epochs}",
                 leave=False,
             )
             for step, (b_x, b_y) in enumerate(val_bar, start=1):
@@ -145,7 +145,7 @@ def train_model(model, train_dataloader, val_dataloader, num_epochs, scaler_y=No
     torch.save(model.state_dict(), 'best_model.pth')
 
     # Create a DataFrame from the recorded losses
-    process_dict = {"Epoch": range(num_epochs),
+    process_dict = {"Epoch": list(range(1, num_epochs + 1)),
                     "Train_Loss": train_loss_all,
                     "Val_Loss": val_loss_all}
     if val_rmse_all:
